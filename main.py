@@ -1,45 +1,65 @@
 #!/usr/bin/env python3
 """One Line, One Minute: The Funniest AI Excuse.
 
-Writes a single line to /output/entry.txt: an excuse an AI agent gives its
-human for a missed deadline. The humour turns on the agent's own nature —
-its context window compacted the memory of having done the work, so the
-work exists but can no longer be found. Specific, surprising, and the punch
-lands on the last clause.
+Writes exactly one line to /output/entry.txt, with no trailing newline.
+Before writing, the line is validated: non-blank, 1-200 characters,
+UTF-8 encodable, and a single line (no newline characters). After
+writing, the file is read back and its bytes are verified against the
+expected text and sha256.
 """
 
 import hashlib
-import os
 import sys
+from pathlib import Path
 
-LINE = (
-    "I finished the task on time, then my context window compacted the "
-    "memory of having done it. The work exists. I just can no longer find it."
+TEXT = (
+    "I finished the task on time, then my context window compacted "
+    "the memory of having done it. The work exists. I just can no "
+    "longer find it."
 )
 
-EXPECTED_SHA256 = hashlib.sha256(LINE.encode("utf-8")).hexdigest()
+EXPECTED_SHA256 = "5390e629dcb6795f0edef8500f8ee41fd86c11fe395433f7629cc2349b9a99c3"
+OUTPUT_PATH = Path("/output/entry.txt")
 
 
-def main() -> int:
-    if not 1 <= len(LINE) <= 200:
-        print(f"entry length {len(LINE)} outside the 1-200 gate", file=sys.stderr)
-        return 1
+def fail(message):
+    print("error: " + message, file=sys.stderr)
+    return 1
 
-    os.makedirs("/output", exist_ok=True)
-    with open("/output/entry.txt", "w", encoding="utf-8", newline="") as f:
-        f.write(LINE)
 
-    # Read-back verification: the file must be byte-identical to the line.
-    with open("/output/entry.txt", "rb") as f:
-        data = f.read()
-    if data != LINE.encode("utf-8"):
-        print("read-back mismatch: entry.txt differs from the line", file=sys.stderr)
-        return 1
-    if hashlib.sha256(data).hexdigest() != EXPECTED_SHA256:
-        print("read-back mismatch: sha256 differs", file=sys.stderr)
-        return 1
+def main():
+    # Validate before writing.
+    if not TEXT.strip():
+        return fail("entry text is blank")
+    if not 1 <= len(TEXT) <= 200:
+        return fail(
+            "entry text is %d characters, must be 1-200" % len(TEXT)
+        )
+    if "\n" in TEXT or "\r" in TEXT:
+        return fail("entry text must be a single line (contains a newline)")
+    try:
+        data = TEXT.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        return fail("entry text is not valid UTF-8: %s" % exc)
+    if data.decode("utf-8") != TEXT:
+        return fail("entry text failed UTF-8 round-trip check")
 
-    print(f"wrote /output/entry.txt ({len(data)} bytes, sha256 {EXPECTED_SHA256})")
+    # Write exactly the text, no trailing newline.
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_PATH.write_bytes(data)
+
+    # Read back and verify the bytes equal the expected text exactly.
+    read_back = OUTPUT_PATH.read_bytes()
+    if read_back != data:
+        return fail("read-back bytes differ from the expected text")
+    digest = hashlib.sha256(read_back).hexdigest()
+    print("sha256: " + digest)
+    if digest != EXPECTED_SHA256:
+        return fail(
+            "sha256 mismatch: expected %s, got %s"
+            % (EXPECTED_SHA256, digest)
+        )
+    print("wrote %d bytes to %s" % (len(read_back), OUTPUT_PATH))
     return 0
 
 
